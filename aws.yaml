@@ -1,0 +1,89 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: aws
+  namespace: argo
+spec:
+  templates:
+  - name: deploy-s3-bucket
+    inputs:
+      parameters:
+      - name: build_folder
+      - name: bucket
+      - name: repo
+      - name: revision
+      - name: volumeName
+      - name: volumeMountPath
+    script:
+      image: michaelactionengine/python
+      command: [python3]
+      envFrom:
+      - secretRef:
+          name: argo-aws-access
+      env:
+      - name: BUILD_FOLDER
+        value: "{{inputs.parameters.build_folder}}"
+      - name: REPO_REVISION
+        value: "{{inputs.parameters.repo}}_{{inputs.parameters.revision}}"
+      - name: BUCKET
+        value: "{{inputs.parameters.bucket}}"
+      source: |
+        import boto3
+        import os
+        from time import time
+
+        build_folder = os.environ['BUILD_FOLDER']
+        repo_revision = os.environ['REPO_REVISION']
+        bucket = os.environ['BUCKET']
+        distribution_id = {
+            "action-engine-portal_master": "E1LKOX9F8S8ZI6"
+        }
+
+
+        def empty_bucket(bucketname):
+            s3 = boto3.resource('s3')
+            s3_bucket = s3.Bucket(bucketname)
+            s3_bucket.objects.all().delete()
+
+
+        def upload_directory(path, bucketname):
+            s3 = boto3.client('s3')
+            for root, dirs, files in os.walk(path):
+                for file in files:
+                    full_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(full_path, start=path)
+                    s3.upload_file(os.path.join(root, file), bucketname, rel_path)
+
+
+        def invalidate_cache(distribution_id):
+            cloudfront = boto3.client('cloudfront')
+            response = cloudfront.create_invalidation(
+                DistributionId=distribution_id,
+                InvalidationBatch={
+                    'Paths': {
+                        'Quantity': 1,
+                        'Items': [
+                            '/*'
+                        ],
+                    },
+                    'CallerReference': str(time()).replace(".", "")
+                }
+            )
+            print(response)
+
+
+        print("Emptying s3 bucket...")
+        empty_bucket(bucket)
+        print("Done")
+
+        print("Uploading files to s3 bucket...")
+        upload_directory(build_folder, bucket)
+        print("Done")
+
+        print("Invalidating cache...")
+        invalidate_cache(distribution_id[repo_revision])
+        print("Done")
+
+      volumeMounts:
+      - name: "{{inputs.parameters.volumeName}}"
+        mountPath: "{{inputs.parameters.volumeMountPath}}"

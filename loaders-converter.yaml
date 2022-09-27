@@ -1,0 +1,93 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: loaders-converter
+  namespace: argo
+spec:
+  templates:
+  - name: create-results-folder
+    inputs:
+      parameters:
+      - name: revision
+    outputs:
+      result: test_results_folder
+    script:
+      image: michaelactionengine/python:latest
+      command: [python3]
+      source: |
+        from datetime import datetime
+        import boto3
+        import os
+
+        revision = os.environ['REVISION']
+        folder = f'results/{datetime.now().strftime("%d-%m-%YT%H:%M:%S")}_{revision}/'
+        s3 = boto3.client('s3')
+        s3.put_object(Bucket='unfolded-models', Key=folder)
+        print(folder)
+      envFrom:
+      - secretRef:
+          name: argo-aws-access
+      env:
+      - name: REVISION
+        value: '{{inputs.parameters.revision}}'
+  - name: conversion
+    inputs:
+      parameters:
+      - name: workingDir
+        default: /workdir
+      - name: dataset
+      - name: flag
+      - name: revision
+      - name: test_results_folder
+      - name: input_type
+      artifacts:
+      - name: script
+        path: "{{inputs.parameters.workingDir}}/test-converter.py"
+        s3:
+          bucket: unfolded-models
+          endpoint: s3.us-east-2.amazonaws.com
+          region: us-east-2
+          key: test-converter.py
+          accessKeySecret:
+            name: argo-aws-access
+            key: AWS_ACCESS_KEY_ID
+          secretKeySecret:
+            name: argo-aws-access
+            key: AWS_SECRET_ACCESS_KEY
+      - name: converter
+        path: "{{inputs.parameters.workingDir}}"
+    outputs:
+      artifacts:
+      - name: logfile
+        path: "{{inputs.parameters.workingDir}}/{{inputs.parameters.dataset}}_{{inputs.parameters.flag}}.log.txt"
+      - name: test-results
+        path: "{{inputs.parameters.workingDir}}/{{inputs.parameters.dataset}}_{{inputs.parameters.flag}}.pdf"
+    container:
+      image: michaelactionengine/python:latest
+      command: [python3]
+      args: ["{{inputs.parameters.workingDir}}/test-converter.py", "{{inputs.parameters.dataset}}", "{{inputs.parameters.flag}}"]
+      workingDir: "{{inputs.parameters.workingDir}}"
+      envFrom:
+      - secretRef:
+          name: argo-aws-access
+      - secretRef:
+          name: postgresql
+      env:
+      - name: BUCKET
+        value: unfolded-models
+      - name: POSTGRES_HOST
+        value: postgresql.argo.svc.cluster.local
+      - name: POSTGRES_PORT
+        value: "5432"
+      - name: POSTGRES_DB
+        value: postgres
+      - name: REVISION
+        value: "{{inputs.parameters.revision}}"
+      - name: TEST_RESULTS_FOLDER
+        value: "{{inputs.parameters.test_results_folder}}"
+      - name: INPUT_TYPE
+        value: "{{inputs.parameters.input_type}}"
+      resources: 
+        requests:
+          cpu: 2
+          memory: 6Gi

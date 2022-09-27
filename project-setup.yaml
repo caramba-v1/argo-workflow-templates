@@ -1,0 +1,72 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: project-setup
+  namespace: argo
+spec:
+  templates:
+  - name: nodejs-with-output
+    inputs:
+      parameters:
+      - name: organization
+        default: caramba-v1
+      - name: repo
+      - name: revision
+      - name: sshSecretName
+        default: argo-ssh-private-key
+      - name: sshSecretKey
+        default: ssh-private-key
+      - name: command
+        default: ""
+      - name: output_artifact
+      artifacts:
+      - name: code
+        path: "/workdir/{{inputs.parameters.repo}}"
+        git:
+          repo: "git@github.com:{{inputs.parameters.organization}}/{{inputs.parameters.repo}}"
+          revision: "{{inputs.parameters.revision}}"
+          sshPrivateKeySecret:
+            name: "{{inputs.parameters.sshSecretName}}"
+            key: "{{inputs.parameters.sshSecretKey}}"
+    outputs:
+      artifacts:
+      - name: output_artifact
+        path: "{{inputs.parameters.output_artifact}}"
+    container:
+      image: node:14.17.6
+      command: [sh, -c]
+      args: ["{{inputs.parameters.command}}"]
+      workingDir: "/workdir/{{inputs.parameters.repo}}"
+  - name: nodejs-with-volume
+    inputs:
+      parameters:
+      - name: organization
+        default: caramba-v1
+      - name: repo
+      - name: revision
+      - name: sshSecretName
+        default: argo-ssh-private-key
+      - name: sshSecretKey
+        default: ssh-private-key
+      - name: command
+        default: ""
+      - name: workingDir
+      - name: volumeName
+      - name: volumeMountPath
+      artifacts:
+      - name: code
+        path: "{{inputs.parameters.workingDir}}/{{inputs.parameters.repo}}"
+        git:
+          repo: "git@github.com:{{inputs.parameters.organization}}/{{inputs.parameters.repo}}"
+          revision: "{{inputs.parameters.revision}}"
+          sshPrivateKeySecret:
+            name: "{{inputs.parameters.sshSecretName}}"
+            key: "{{inputs.parameters.sshSecretKey}}"
+    container:
+      image: node:14.17.6
+      command: [sh, -c]
+      args: ["{{inputs.parameters.command}}"]
+      workingDir: "{{inputs.parameters.workingDir}}/{{inputs.parameters.repo}}"
+      volumeMounts:
+      - name: "{{inputs.parameters.volumeName}}"
+        mountPath: "{{inputs.parameters.volumeMountPath}}"

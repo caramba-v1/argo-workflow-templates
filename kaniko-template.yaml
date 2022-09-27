@@ -1,0 +1,31 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: kaniko
+  namespace: argo
+spec:
+  templates:
+  - name: build-image
+    inputs:
+      parameters:
+      - name: code
+      - name: ecr_uri
+        default: 915249421274.dkr.ecr.us-east-2.amazonaws.com
+      - name: image
+      - name: tag
+      - name: volumeName
+      - name: volumeMountPath
+    script:
+      image: gcr.io/kaniko-project/executor:debug
+      command: [sh]
+      envFrom:
+      - secretRef:
+          name: argo-aws-access
+      source: |
+        mkdir -p /kaniko/.docker
+        echo {{inputs.parameters.ecr_uri}}/{{inputs.parameters.image}}:{{inputs.parameters.tag}}
+        echo "{\"credHelpers\":{\"{{inputs.parameters.ecr_uri}}\":\"ecr-login\"}}" > /kaniko/.docker/config.json
+        /kaniko/executor --cache=true --context {{inputs.parameters.code}} --destination {{inputs.parameters.ecr_uri}}/{{inputs.parameters.image}}:{{inputs.parameters.tag}}
+      volumeMounts:
+      - name: "{{inputs.parameters.volumeName}}"
+        mountPath: "{{inputs.parameters.volumeMountPath}}"
